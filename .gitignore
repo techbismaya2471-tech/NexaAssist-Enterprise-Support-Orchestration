@@ -1,0 +1,20 @@
+.sfdx/
+.sf/
+.vscode/
+node_modules/
+coverage/
+.env
+*.log
+*.tmp
+.DS_Store
+
+# Salesforce local/auth files
+**/.sfdx/
+**/.sf/
+
+# Secrets / config placeholders
+config/secrets.json
+credentials.json
+
+# OS / editor noise
+Thumbs.db
