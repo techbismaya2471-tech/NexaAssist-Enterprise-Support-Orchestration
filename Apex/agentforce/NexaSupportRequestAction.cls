@@ -36,6 +36,12 @@ public with sharing class NexaSupportRequestAction {
                 pendingLog.Pending_Follow_Up_status__c = NexaSupportConfig.FOLLOW_UP_STATUS_PENDING;
                 pendingLog.Pending_Follow_Up_Type__c = NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
                 pendingLog.Correlation_Id__c = String.valueOf(Crypto.getRandomLong());
+                //pendingLog.Channel_Type__c = 'Web';
+                pendingLog.Channel_Type__c = deriveChannelType('agentforce');
+                pendingLog.Identity_Resolution_Status__c = 'Unknown';
+                pendingLog.Interaction_Timestamp__c = DateTime.now();
+                pendingLog.Resolution_Status__c = 'Unresolved';
+                pendingLog.Customer_Sentiment__c = 'Neutral';
 
                 insert pendingLog;
 
@@ -57,6 +63,8 @@ public with sharing class NexaSupportRequestAction {
                 results.add(res);
                 continue;
             }
+            CustomerInsightService.InsightResult insightResult = 
+            CustomerInsightService.fetchInsight(contacts[0].Id);
 
             List<Interaction_Log__c> pendingLogs = [
                 SELECT Id, Query_Text__c, Pending_Follow_Up_status__c, Pending_Follow_Up_Type__c
@@ -73,10 +81,37 @@ public with sharing class NexaSupportRequestAction {
             issueToProcess = pendingLogs[0].Query_Text__c;
 
             pendingLogs[0].Contact__c = contacts[0].Id;
+            pendingLogs[0].Identity_Resolution_Status__c = 'Matched Existing Customer';
+            pendingLogs[0].Unified_Customer_Key__c =buildUnifiedCustomerKey(contacts[0]);
+            if (String.isNotBlank(insightResult.unifiedCustomerId)) {
+                pendingLogs[0].Unified_Customer_Key__c = insightResult.unifiedCustomerId;
+            }
+            pendingLogs[0].Channel_Type__c = deriveChannelType('agentforce');
+            pendingLogs[0].Pending_Follow_Up_Type__c =NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
+            
             pendingLogs[0].Pending_Follow_Up_status__c = NexaSupportConfig.FOLLOW_UP_STATUS_COMPLETED;
             pendingLogs[0].Response_Summary__c = 'Customer email verified and original issue recovered for support processing.';
             update pendingLogs[0];
-}
+                }
+                else {
+                    Interaction_Log__c completedLog = new Interaction_Log__c();
+                    completedLog.Contact__c = contacts[0].Id;
+                    completedLog.Query_Text__c = req.userMessage;
+                    completedLog.Source_Channel__c = NexaSupportConfig.SOURCE_CHANNEL_AGENTFORCE;
+                    completedLog.Channel_Type__c = deriveChannelType('agentforce');
+                    completedLog.Identity_Resolution_Status__c = 'Matched Existing Customer';
+                    completedLog.Unified_Customer_Key__c = buildUnifiedCustomerKey(contacts[0]);
+                    if (insightResult != null && String.isNotBlank(insightResult.unifiedCustomerId)) {
+                        completedLog.Unified_Customer_Key__c = insightResult.unifiedCustomerId;
+                        }
+                    completedLog.Pending_Follow_Up_Type__c = NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
+                    completedLog.Pending_Follow_Up_Status__c = NexaSupportConfig.FOLLOW_UP_STATUS_COMPLETED;
+                    completedLog.Response_Summary__c = 'Customer email verified and issue processed through support flow.';
+                    completedLog.Interaction_Timestamp__c = DateTime.now();
+                    completedLog.Resolution_Status__c = 'Unresolved';
+                    completedLog.Customer_Sentiment__c = 'Neutral';
+                    insert completedLog;
+                }
 
             String rawClassificationResponse =
                 NexaPromptClassificationService.classifyCustomerMessage(issueToProcess);
@@ -137,7 +172,8 @@ public with sharing class NexaSupportRequestAction {
                 issueToProcess,
                 detectedCategory,
                 wantsHumanSupport,
-                issueNature
+                issueNature,
+                 insightResult
             );
 
             res.success = true;
@@ -157,12 +193,13 @@ public with sharing class NexaSupportRequestAction {
         String issueToProcess,
         String detectedCategory,
         Boolean wantsHumanSupport,
-        String issueNature
+        String issueNature,
+        CustomerInsightService.InsightResult insightResult
     ) {
        // CustomerInsightService.InsightResult insightResult =
         //CustomerInsightService.fetchInsight(matchedContact.Id);
-        CustomerInsightService.InsightResult insightResult=
-        CustomerInsightService.fetchInsight(matchedContact.Id);
+        // CustomerInsightService.InsightResult insightResult=
+        // CustomerInsightService.fetchInsight(matchedContact.Id);
 
         Boolean forceEscalationFromInsight = insightResult.forceEscalation;
         Boolean forceHighPriorityFromInsight = insightResult.forceHighPriority;
@@ -173,8 +210,10 @@ public with sharing class NexaSupportRequestAction {
     + ', segment=' + insightResult.segment
     + ', healthScore=' + insightResult.healthScore
     + ', churnRisk=' + insightResult.churnRisk
-    + ', preferredChannel=' + insightResult.preferredChannel);
-        
+    + ', preferredChannel=' + insightResult.preferredChannel
+    + ', adoptionScore=' + insightResult.adoptionScore
+    + ', lastProductUsageDate=' + insightResult.lastProductUsageDate
+    + ', unifiedCustomerId=' + insightResult.unifiedCustomerId);
         
         
         Group humanSupportQueue = [
@@ -276,4 +315,49 @@ public with sharing class NexaSupportRequestAction {
         return 'A new support case ' + newCase.CaseNumber +
             ' has been created successfully. Our team will continue working on your request.';
     }
+    private static String deriveChannelType(String source) {
+    if (String.isBlank(source)) {
+        return 'Web';
+    }
+
+    String normalizedSource = source.trim().toLowerCase();
+
+    if (normalizedSource == 'web' ||
+        normalizedSource == 'chat' ||
+        normalizedSource == 'agentforce' ||
+        normalizedSource == 'messaging') {
+        return 'Web';
+    }
+
+    if (normalizedSource == 'email') {
+        return 'Email';
+    }
+
+    if (normalizedSource == 'api' ||
+        normalizedSource == 'portal' ||
+        normalizedSource == 'integration') {
+        return 'API';
+    }
+
+    if (normalizedSource == 'voice' ||
+        normalizedSource == 'call') {
+        return 'Voice';
+    }
+
+    return 'Web';
+}
+/*private static String deriveChannelType() {
+    return 'Web';
+}*/
+private static String buildUnifiedCustomerKey(Contact c) {
+    if (c == null) {
+        return null;
+    }
+
+    if (c.AccountId != null) {
+        return 'ACC-' + c.AccountId + '_CON-' + c.Id;
+    }
+
+    return 'CON-' + c.Id;
+}
 }
