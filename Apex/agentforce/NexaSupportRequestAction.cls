@@ -36,7 +36,6 @@ public with sharing class NexaSupportRequestAction {
                 pendingLog.Pending_Follow_Up_status__c = NexaSupportConfig.FOLLOW_UP_STATUS_PENDING;
                 pendingLog.Pending_Follow_Up_Type__c = NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
                 pendingLog.Correlation_Id__c = String.valueOf(Crypto.getRandomLong());
-                //pendingLog.Channel_Type__c = 'Web';
                 pendingLog.Channel_Type__c = deriveChannelType('agentforce');
                 pendingLog.Identity_Resolution_Status__c = 'Unknown';
                 pendingLog.Interaction_Timestamp__c = DateTime.now();
@@ -63,8 +62,9 @@ public with sharing class NexaSupportRequestAction {
                 results.add(res);
                 continue;
             }
+
             CustomerInsightService.InsightResult insightResult = 
-            CustomerInsightService.fetchInsight(contacts[0].Id);
+                CustomerInsightService.fetchInsight(contacts[0].Id);
 
             List<Interaction_Log__c> pendingLogs = [
                 SELECT Id, Query_Text__c, Pending_Follow_Up_status__c, Pending_Follow_Up_Type__c
@@ -78,40 +78,38 @@ public with sharing class NexaSupportRequestAction {
             String issueToProcess = req.userMessage;
 
             if (!pendingLogs.isEmpty() && !String.isBlank(pendingLogs[0].Query_Text__c)) {
-            issueToProcess = pendingLogs[0].Query_Text__c;
+                issueToProcess = pendingLogs[0].Query_Text__c;
 
-            pendingLogs[0].Contact__c = contacts[0].Id;
-            pendingLogs[0].Identity_Resolution_Status__c = 'Matched Existing Customer';
-            pendingLogs[0].Unified_Customer_Key__c =buildUnifiedCustomerKey(contacts[0]);
-            if (String.isNotBlank(insightResult.unifiedCustomerId)) {
-                pendingLogs[0].Unified_Customer_Key__c = insightResult.unifiedCustomerId;
+                pendingLogs[0].Contact__c = contacts[0].Id;
+                pendingLogs[0].Identity_Resolution_Status__c = 'Matched Existing Customer';
+                pendingLogs[0].Unified_Customer_Key__c = buildUnifiedCustomerKey(contacts[0]);
+                if (String.isNotBlank(insightResult.unifiedCustomerId)) {
+                    pendingLogs[0].Unified_Customer_Key__c = insightResult.unifiedCustomerId;
+                }
+                pendingLogs[0].Channel_Type__c = deriveChannelType('agentforce');
+                pendingLogs[0].Pending_Follow_Up_Type__c = NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
+                pendingLogs[0].Pending_Follow_Up_status__c = NexaSupportConfig.FOLLOW_UP_STATUS_COMPLETED;
+                pendingLogs[0].Response_Summary__c = 'Customer email verified and original issue recovered for support processing.';
+                update pendingLogs[0];
+            } else {
+                Interaction_Log__c completedLog = new Interaction_Log__c();
+                completedLog.Contact__c = contacts[0].Id;
+                completedLog.Query_Text__c = req.userMessage;
+                completedLog.Source_Channel__c = NexaSupportConfig.SOURCE_CHANNEL_AGENTFORCE;
+                completedLog.Channel_Type__c = deriveChannelType('agentforce');
+                completedLog.Identity_Resolution_Status__c = 'Matched Existing Customer';
+                completedLog.Unified_Customer_Key__c = buildUnifiedCustomerKey(contacts[0]);
+                if (insightResult != null && String.isNotBlank(insightResult.unifiedCustomerId)) {
+                    completedLog.Unified_Customer_Key__c = insightResult.unifiedCustomerId;
+                }
+                completedLog.Pending_Follow_Up_Type__c = NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
+                completedLog.Pending_Follow_Up_Status__c = NexaSupportConfig.FOLLOW_UP_STATUS_COMPLETED;
+                completedLog.Response_Summary__c = 'Customer email verified and issue processed through support flow.';
+                completedLog.Interaction_Timestamp__c = DateTime.now();
+                completedLog.Resolution_Status__c = 'Unresolved';
+                completedLog.Customer_Sentiment__c = 'Neutral';
+                insert completedLog;
             }
-            pendingLogs[0].Channel_Type__c = deriveChannelType('agentforce');
-            pendingLogs[0].Pending_Follow_Up_Type__c =NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
-            
-            pendingLogs[0].Pending_Follow_Up_status__c = NexaSupportConfig.FOLLOW_UP_STATUS_COMPLETED;
-            pendingLogs[0].Response_Summary__c = 'Customer email verified and original issue recovered for support processing.';
-            update pendingLogs[0];
-                }
-                else {
-                    Interaction_Log__c completedLog = new Interaction_Log__c();
-                    completedLog.Contact__c = contacts[0].Id;
-                    completedLog.Query_Text__c = req.userMessage;
-                    completedLog.Source_Channel__c = NexaSupportConfig.SOURCE_CHANNEL_AGENTFORCE;
-                    completedLog.Channel_Type__c = deriveChannelType('agentforce');
-                    completedLog.Identity_Resolution_Status__c = 'Matched Existing Customer';
-                    completedLog.Unified_Customer_Key__c = buildUnifiedCustomerKey(contacts[0]);
-                    if (insightResult != null && String.isNotBlank(insightResult.unifiedCustomerId)) {
-                        completedLog.Unified_Customer_Key__c = insightResult.unifiedCustomerId;
-                        }
-                    completedLog.Pending_Follow_Up_Type__c = NexaSupportConfig.FOLLOW_UP_TYPE_CLARIFICATION;
-                    completedLog.Pending_Follow_Up_Status__c = NexaSupportConfig.FOLLOW_UP_STATUS_COMPLETED;
-                    completedLog.Response_Summary__c = 'Customer email verified and issue processed through support flow.';
-                    completedLog.Interaction_Timestamp__c = DateTime.now();
-                    completedLog.Resolution_Status__c = 'Unresolved';
-                    completedLog.Customer_Sentiment__c = 'Neutral';
-                    insert completedLog;
-                }
 
             String rawClassificationResponse =
                 NexaPromptClassificationService.classifyCustomerMessage(issueToProcess);
@@ -126,6 +124,7 @@ public with sharing class NexaSupportRequestAction {
             String issueNature = parsed != null ? parsed.issueNature : null;
             String classificationSummary = parsed != null ? parsed.summary : null;
             String detectedIntent = parsed != null ? parsed.intent : null;
+            Boolean isFollowUp = parsed != null ? parsed.isFollowUp : false;
 
             System.debug('ACTION_RAW_JSON = ' + rawClassificationResponse);
             System.debug('ACTION_PARSED_CATEGORY = ' + detectedCategory);
@@ -133,109 +132,153 @@ public with sharing class NexaSupportRequestAction {
             System.debug('ACTION_PARSED_ISSUE_NATURE = ' + issueNature);
             System.debug('ACTION_PARSED_WANTS_HUMAN = ' + wantsHumanSupport);
             System.debug('ACTION_PARSED_SUMMARY = ' + classificationSummary);
+            System.debug('ACTION_PARSED_IS_FOLLOWUP = ' + isFollowUp);
 
-            /*  if (String.isBlank(detectedCategory)) {
-                detectedCategory = 'General INquiry';
+            if (String.isBlank(detectedCategory)) {
+                res.success = false;
+                res.responseMessage = NexaSupportConfig.MSG_UNSUPPORTED_REQUEST;
+                results.add(res);
+                continue;
+            }
+
+            Set<String> supportedCategories = new Set<String>{
+                'Login',
+                'Billing',
+                'Technical',
+                'General Inquiry'
+            };
+
+            if (!supportedCategories.contains(detectedCategory)) {
+                res.success = false;
+                res.responseMessage = NexaSupportConfig.MSG_UNSUPPORTED_REQUEST;
+                results.add(res);
+                continue;
             }
 
             if (wantsHumanSupport == null) {
                 wantsHumanSupport = false;
-            }*/
-
-                if (String.isBlank(detectedCategory)) {
-                    res.success = false;
-                    res.responseMessage = NexaSupportConfig.MSG_UNSUPPORTED_REQUEST;
-                    results.add(res);
-                    continue;
-                }
-
-                Set<String> supportedCategories = new Set<String>{
-                    'Login',
-                    'Billing',
-                    'Technical',
-                    'General Inquiry'
-                };
-
-                if (!supportedCategories.contains(detectedCategory)) {
-                    res.success = false;
-                    res.responseMessage = NexaSupportConfig.MSG_UNSUPPORTED_REQUEST;
-                    results.add(res);
-                    continue;
-                }
-                if (wantsHumanSupport == null) {
-                wantsHumanSupport = false;
             }
 
-  if (wantsHumanSupport == true && String.isBlank(detectedCategory)) {
-    Integer openCaseCount = [
-        SELECT COUNT()
-        FROM Case
-        WHERE ContactId = :contacts[0].Id
-          AND Status != :NexaSupportConfig.CASE_STATUS_CLOSED
-    ];
+            if (isFollowUp == null) {
+                isFollowUp = false;
+            }
 
-    if (openCaseCount >= 2) {
-        Group humanQueue = [
-            SELECT Id FROM Group
-            WHERE Type = 'Queue'
-            AND DeveloperName = :NexaSupportConfig.HUMAN_SUPPORT_QUEUE_DEV_NAME
-            LIMIT 1
-        ];
-        res.success = true;
-        res.responseMessage = 'We can see you have multiple open issues. Our priority support team has been notified and will review all your open issues and get back to you as soon as possible.';
-        results.add(res);
-        continue;
-    }
-    else if (openCaseCount == 1) {
-        Group humanSupportQueue = [
-        SELECT Id
-        FROM Group
-        WHERE Type = 'Queue'
-        AND DeveloperName = :NexaSupportConfig.HUMAN_SUPPORT_QUEUE_DEV_NAME
-        LIMIT 1
-];
-    List<Case> singleOpenCase = [
-        SELECT Id, CaseNumber, Status, Priority, Escalated__c, Issue_Category__c
-        FROM Case
-        WHERE ContactId = :contacts[0].Id
-          AND Status != :NexaSupportConfig.CASE_STATUS_CLOSED
-        LIMIT 1
-    ];
+            // ── Fix 7: isFollowUp logic ──────────────────────────────────────
+            if (isFollowUp == true) {
+                Integer openCaseCount = [
+                    SELECT COUNT()
+                    FROM Case
+                    WHERE ContactId = :contacts[0].Id
+                      AND Status != :NexaSupportConfig.CASE_STATUS_CLOSED
+                ];
 
-    if (!singleOpenCase.isEmpty()) {
-        Case autoCase = singleOpenCase[0];
-        if (autoCase.Escalated__c == true) {
-            res.success = true;
-            res.responseMessage = 'We can see you have multiple open issues. Your existing case ' + autoCase.CaseNumber + ' has already been escalated and our priority support team is actively working on it. You will be contacted soon.';
-            results.add(res);
-            continue;
-        }
-        autoCase.Priority = NexaSupportConfig.PRIORITY_HIGH;
-        autoCase.Escalated__c = true;
-        autoCase.OwnerId = humanSupportQueue.Id;
-        update autoCase;
-        res.success = true;
-        res.responseMessage = 'We understand your issue is still unresolved. Your existing case ' + autoCase.CaseNumber + ' has been escalated to our priority support team. They will follow up with you as soon as possible.';
-        results.add(res);
-        continue;
-    }
-}
-// else if (openCaseCount == 1) {
-//     res.success = true;
-//     res.responseMessage = 'We can see you have an open issue with us. Could you please tell us which issue you need help with — is it related to your existing billing, login, or technical issue? Or is it something new?';
-//     results.add(res);
-//     continue;
- else {
-    res.success = true;
-    res.responseMessage = 'We would be happy to connect you with our support team. Could you please tell us what type of issue you are facing — is it a billing concern, login issue, technical problem, or something else?';
-    results.add(res);
-    continue;
-}
-    // res.success = true;
-    // res.responseMessage = 'We would be happy to connect you with our support team. Could you please tell us which issue you need help with — is it a billing concern, login issue, technical problem, or something else?';
-    // results.add(res);
-    // continue;
-}
+                if (openCaseCount == 0) {
+                    res.success = true;
+                    res.responseMessage = 'We could not find any open issues associated with your account. Could you please describe your issue so we can assist you?';
+                    results.add(res);
+                    continue;
+
+                } else if (openCaseCount == 1) {
+                    Group humanSupportQueue = [
+                        SELECT Id
+                        FROM Group
+                        WHERE Type = 'Queue'
+                        AND DeveloperName = :NexaSupportConfig.HUMAN_SUPPORT_QUEUE_DEV_NAME
+                        LIMIT 1
+                    ];
+                    List<Case> singleOpenCase = [
+                        SELECT Id, CaseNumber, Status, Priority, Escalated__c, Issue_Category__c
+                        FROM Case
+                        WHERE ContactId = :contacts[0].Id
+                          AND Status != :NexaSupportConfig.CASE_STATUS_CLOSED
+                        LIMIT 1
+                    ];
+                    if (!singleOpenCase.isEmpty()) {
+                        Case followUpCase = singleOpenCase[0];
+                        if (followUpCase.Escalated__c == true) {
+                            res.success = true;
+                            res.responseMessage = 'Your existing case ' + followUpCase.CaseNumber + ' has already been escalated and our priority support team is actively working on it. You will be contacted soon.';
+                            results.add(res);
+                            continue;
+                        }
+                        followUpCase.Priority = NexaSupportConfig.PRIORITY_HIGH;
+                        followUpCase.Escalated__c = true;
+                        followUpCase.OwnerId = humanSupportQueue.Id;
+                        update followUpCase;
+                        res.success = true;
+                        res.responseMessage = 'We understand your issue is still unresolved. Your existing case ' + followUpCase.CaseNumber + ' has been escalated to our priority support team with high priority. They will follow up with you as soon as possible.';
+                        results.add(res);
+                        continue;
+                    }
+
+                } else {
+                    res.success = true;
+                    res.responseMessage = 'You currently have multiple open issues. Which issue are you following up on — billing, login, technical, or another issue?';
+                    results.add(res);
+                    continue;
+                }
+            }
+            // ── End Fix 7 ────────────────────────────────────────────────────
+
+            if (wantsHumanSupport == true && String.isBlank(detectedCategory)) {
+                Integer openCaseCount = [
+                    SELECT COUNT()
+                    FROM Case
+                    WHERE ContactId = :contacts[0].Id
+                      AND Status != :NexaSupportConfig.CASE_STATUS_CLOSED
+                ];
+
+                if (openCaseCount >= 2) {
+                    Group humanQueue = [
+                        SELECT Id FROM Group
+                        WHERE Type = 'Queue'
+                        AND DeveloperName = :NexaSupportConfig.HUMAN_SUPPORT_QUEUE_DEV_NAME
+                        LIMIT 1
+                    ];
+                    res.success = true;
+                    res.responseMessage = 'We can see you have multiple open issues. Our priority support team has been notified and will review all your open issues and get back to you as soon as possible.';
+                    results.add(res);
+                    continue;
+                } else if (openCaseCount == 1) {
+                    Group humanSupportQueue = [
+                        SELECT Id
+                        FROM Group
+                        WHERE Type = 'Queue'
+                        AND DeveloperName = :NexaSupportConfig.HUMAN_SUPPORT_QUEUE_DEV_NAME
+                        LIMIT 1
+                    ];
+                    List<Case> singleOpenCase = [
+                        SELECT Id, CaseNumber, Status, Priority, Escalated__c, Issue_Category__c
+                        FROM Case
+                        WHERE ContactId = :contacts[0].Id
+                          AND Status != :NexaSupportConfig.CASE_STATUS_CLOSED
+                        LIMIT 1
+                    ];
+
+                    if (!singleOpenCase.isEmpty()) {
+                        Case autoCase = singleOpenCase[0];
+                        if (autoCase.Escalated__c == true) {
+                            res.success = true;
+                            res.responseMessage = 'We can see you have multiple open issues. Your existing case ' + autoCase.CaseNumber + ' has already been escalated and our priority support team is actively working on it. You will be contacted soon.';
+                            results.add(res);
+                            continue;
+                        }
+                        autoCase.Priority = NexaSupportConfig.PRIORITY_HIGH;
+                        autoCase.Escalated__c = true;
+                        autoCase.OwnerId = humanSupportQueue.Id;
+                        update autoCase;
+                        res.success = true;
+                        res.responseMessage = 'We understand your issue is still unresolved. Your existing case ' + autoCase.CaseNumber + ' has been escalated to our priority support team. They will follow up with you as soon as possible.';
+                        results.add(res);
+                        continue;
+                    }
+                } else {
+                    res.success = true;
+                    res.responseMessage = 'We would be happy to connect you with our support team. Could you please tell us what type of issue you are facing — is it a billing concern, login issue, technical problem, or something else?';
+                    results.add(res);
+                    continue;
+                }
+            }
 
             String finalProcessingMessage = processSupportCase(
                 contacts[0],
@@ -243,15 +286,12 @@ public with sharing class NexaSupportRequestAction {
                 detectedCategory,
                 wantsHumanSupport,
                 issueNature,
-                insightResult
+                insightResult,
+                req.userMessage
             );
 
             res.success = true;
-            //res.responseMessage = finalProcessingMessage;
-            //res.responseMessage = finalProcessingMessage + ' | DEBUG category=' + detectedCategory;
             res.responseMessage = finalProcessingMessage;
-    // + ' | DEBUG raw=' + rawClassificationResponse
-    // + ' | category=' + detectedCategory;
             results.add(res);
         }
 
@@ -264,28 +304,23 @@ public with sharing class NexaSupportRequestAction {
         String detectedCategory,
         Boolean wantsHumanSupport,
         String issueNature,
-        CustomerInsightService.InsightResult insightResult
+        CustomerInsightService.InsightResult insightResult,
+        String originalUserMessage
     ) {
-       // CustomerInsightService.InsightResult insightResult =
-        //CustomerInsightService.fetchInsight(matchedContact.Id);
-        // CustomerInsightService.InsightResult insightResult=
-        // CustomerInsightService.fetchInsight(matchedContact.Id);
-
         Boolean forceEscalationFromInsight = insightResult.forceEscalation;
         Boolean forceHighPriorityFromInsight = insightResult.forceHighPriority;
         Boolean fasterSupportPathFromInsight = insightResult.fasterSupportPath;
         String insightNote = insightResult.internalInsightNote;
 
         System.debug('INSIGHT hasInsight=' + insightResult.hasInsight
-    + ', segment=' + insightResult.segment
-    + ', healthScore=' + insightResult.healthScore
-    + ', churnRisk=' + insightResult.churnRisk
-    + ', preferredChannel=' + insightResult.preferredChannel
-    + ', adoptionScore=' + insightResult.adoptionScore
-    + ', lastProductUsageDate=' + insightResult.lastProductUsageDate
-    + ', unifiedCustomerId=' + insightResult.unifiedCustomerId);
-        
-        
+            + ', segment=' + insightResult.segment
+            + ', healthScore=' + insightResult.healthScore
+            + ', churnRisk=' + insightResult.churnRisk
+            + ', preferredChannel=' + insightResult.preferredChannel
+            + ', adoptionScore=' + insightResult.adoptionScore
+            + ', lastProductUsageDate=' + insightResult.lastProductUsageDate
+            + ', unifiedCustomerId=' + insightResult.unifiedCustomerId);
+
         Group humanSupportQueue = [
             SELECT Id
             FROM Group
@@ -293,6 +328,7 @@ public with sharing class NexaSupportRequestAction {
             AND DeveloperName = :NexaSupportConfig.HUMAN_SUPPORT_QUEUE_DEV_NAME
             LIMIT 1
         ];
+
         Integer totalOpenCases = [
             SELECT COUNT()
             FROM Case
@@ -310,40 +346,32 @@ public with sharing class NexaSupportRequestAction {
             LIMIT 1
         ];
 
-       if (!existingCases.isEmpty() && issueNature != NexaSupportConfig.ISSUE_NATURE_PHYSICAL) {
-              Case existingCase = existingCases[0];
+        if (!existingCases.isEmpty() && issueNature != NexaSupportConfig.ISSUE_NATURE_PHYSICAL) {
+            Case existingCase = existingCases[0];
 
-            // if (existingCase.Escalated__c == true) {
-            //     return NexaSupportConfig.MSG_ALREADY_ESCALATED;
-            // }
             if (existingCase.Escalated__c == true) {
-            // Check if customer explicitly wants a new separate case
-            Boolean explicitNewCase = issueToProcess != null && (
-                issueToProcess.toLowerCase().contains('different') ||
-                issueToProcess.toLowerCase().contains('separate case') ||
-                issueToProcess.toLowerCase().contains('new case') ||
-                issueToProcess.toLowerCase().contains('another case')
-    );
+                Boolean explicitNewCase = originalUserMessage != null && (
+                    originalUserMessage.toLowerCase().contains('different') ||
+                    originalUserMessage.toLowerCase().contains('separate case') ||
+                    originalUserMessage.toLowerCase().contains('new case') ||
+                    originalUserMessage.toLowerCase().contains('another case')
+                );
 
-    if (!explicitNewCase) {
-        return NexaSupportConfig.MSG_ALREADY_ESCALATED;
-    }
-    // Customer wants separate case — fall through to create new case
-}
+                if (!explicitNewCase) {
+                    return NexaSupportConfig.MSG_ALREADY_ESCALATED;
+                }
+            } else {
+                existingCase.Priority = NexaSupportConfig.PRIORITY_HIGH;
+                existingCase.Escalated__c = true;
+                existingCase.OwnerId = humanSupportQueue.Id;
+                update existingCase;
 
-            existingCase.Priority = NexaSupportConfig.PRIORITY_HIGH;
-            existingCase.Escalated__c = true;
-            existingCase.OwnerId=humanSupportQueue.Id;
-            update existingCase;
-
-if (totalOpenCases >= 2) {
-    return 'We can see you have multiple open issues. Your existing case ' + existingCase.CaseNumber + ' has been escalated to our priority support team. They will review all your open issues and get back to you as soon as possible.';
-     }
-return 'Your existing case ' + existingCase.CaseNumber +
-    ' has been escalated to our human support team with high priority. They will assist you further with your ' + detectedCategory + ' issue.';
-
-            // return 'Your existing case ' + existingCase.CaseNumber +
-            //     ' has been escalated to our human support team with high priority.';
+                if (totalOpenCases >= 2) {
+                    return 'We can see you have multiple open issues. Your existing case ' + existingCase.CaseNumber + ' has been escalated to our priority support team. They will review all your open issues and get back to you as soon as possible.';
+                }
+                return 'Your existing case ' + existingCase.CaseNumber +
+                    ' has been escalated to our human support team with high priority. They will assist you further with your ' + detectedCategory + ' issue.';
+            }
         }
 
         Boolean requiresImmediateEscalation = false;
@@ -362,7 +390,6 @@ return 'Your existing case ' + existingCase.CaseNumber +
             if (issueNature == NexaSupportConfig.ISSUE_NATURE_PHYSICAL) {
                 requiresImmediateEscalation = true;
             }
-
             if (wantsHumanSupport == true) {
                 requiresImmediateEscalation = true;
             }
@@ -373,88 +400,78 @@ return 'Your existing case ' + existingCase.CaseNumber +
         newCase.AccountId = matchedContact.AccountId;
         newCase.Subject = 'NexaAssist Support - ' + detectedCategory;
         newCase.Description = issueToProcess;
-    if (String.isNotBlank(insightNote)) {
-             newCase.Description = (newCase.Description == null ? '' : newCase.Description + '\n\n')
-          + 'Customer Insight: ' + insightNote;
-       }
+        if (String.isNotBlank(insightNote)) {
+            newCase.Description = (newCase.Description == null ? '' : newCase.Description + '\n\n')
+                + 'Customer Insight: ' + insightNote;
+        }
         newCase.Status = NexaSupportConfig.CASE_STATUS_NEW;
-        /*newCase.Priority = requiresImmediateEscalation
-            ? NexaSupportConfig.PRIORITY_HIGH
-            : NexaSupportConfig.PRIORITY_MEDIUM;*/
-
-          newCase.Priority = (requiresImmediateEscalation || forceHighPriorityFromInsight)
+        newCase.Priority = (requiresImmediateEscalation || forceHighPriorityFromInsight)
             ? NexaSupportConfig.PRIORITY_HIGH
             : NexaSupportConfig.PRIORITY_MEDIUM;
-            
         newCase.Issue_Category__c = detectedCategory;
         System.debug('CASE_CATEGORY_BEFORE_INSERT = ' + newCase.Issue_Category__c);
 
         insert newCase;
-        newCase=[ Select Id,CaseNumber from Case where Id=:newCase.Id];
+        newCase = [SELECT Id, CaseNumber FROM Case WHERE Id = :newCase.Id];
 
         if (requiresImmediateEscalation) {
             newCase.Escalated__c = true;
             newCase.Priority = NexaSupportConfig.PRIORITY_HIGH;
-            newCase.OwnerId=humanSupportQueue.Id;
+            newCase.OwnerId = humanSupportQueue.Id;
             update newCase;
 
             if (totalOpenCases >= 2) {
-        return 'We can see you have multiple open issues. A new support case has been created and immediately escalated to our priority support team. They will review all your open issues and get back to you as soon as possible.';
-              }
-       return 'A new support case ' + newCase.CaseNumber +
-        ' has been created and escalated to our human support team with high priority.';
+                return 'We can see you have multiple open issues. A new support case has been created and immediately escalated to our priority support team. They will review all your open issues and get back to you as soon as possible.';
             }
-
-        //     return 'A new support case ' + newCase.CaseNumber +
-        //         ' has been created and escalated to our human support team with high priority.';
-        // }
+            return 'A new support case ' + newCase.CaseNumber +
+                ' has been created and escalated to our human support team with high priority.';
+        }
 
         return 'A new support case ' + newCase.CaseNumber +
             ' has been created successfully. Our team will continue working on your request.';
     }
+
     private static String deriveChannelType(String source) {
-    if (String.isBlank(source)) {
+        if (String.isBlank(source)) {
+            return 'Web';
+        }
+
+        String normalizedSource = source.trim().toLowerCase();
+
+        if (normalizedSource == 'web' ||
+            normalizedSource == 'chat' ||
+            normalizedSource == 'agentforce' ||
+            normalizedSource == 'messaging') {
+            return 'Web';
+        }
+
+        if (normalizedSource == 'email') {
+            return 'Email';
+        }
+
+        if (normalizedSource == 'api' ||
+            normalizedSource == 'portal' ||
+            normalizedSource == 'integration') {
+            return 'API';
+        }
+
+        if (normalizedSource == 'voice' ||
+            normalizedSource == 'call') {
+            return 'Voice';
+        }
+
         return 'Web';
     }
 
-    String normalizedSource = source.trim().toLowerCase();
+    private static String buildUnifiedCustomerKey(Contact c) {
+        if (c == null) {
+            return null;
+        }
 
-    if (normalizedSource == 'web' ||
-        normalizedSource == 'chat' ||
-        normalizedSource == 'agentforce' ||
-        normalizedSource == 'messaging') {
-        return 'Web';
+        if (c.AccountId != null) {
+            return 'ACC-' + c.AccountId + '_CON-' + c.Id;
+        }
+
+        return 'CON-' + c.Id;
     }
-
-    if (normalizedSource == 'email') {
-        return 'Email';
-    }
-
-    if (normalizedSource == 'api' ||
-        normalizedSource == 'portal' ||
-        normalizedSource == 'integration') {
-        return 'API';
-    }
-
-    if (normalizedSource == 'voice' ||
-        normalizedSource == 'call') {
-        return 'Voice';
-    }
-
-    return 'Web';
-}
-/*private static String deriveChannelType() {
-    return 'Web';
-}*/
-private static String buildUnifiedCustomerKey(Contact c) {
-    if (c == null) {
-        return null;
-    }
-
-    if (c.AccountId != null) {
-        return 'ACC-' + c.AccountId + '_CON-' + c.Id;
-    }
-
-    return 'CON-' + c.Id;
-}
 }

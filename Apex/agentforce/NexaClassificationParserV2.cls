@@ -18,6 +18,9 @@ public with sharing class NexaClassificationParserV2 {
         public Boolean wantsHumanSupport;
 
         @InvocableVariable
+        public Boolean isFollowUp;
+
+        @InvocableVariable
         public String summary;
     }
 
@@ -38,26 +41,13 @@ public with sharing class NexaClassificationParserV2 {
         r.category = extractStringValue(raw, 'category');
         r.issueNature = extractNullableStringValue(raw, 'issueNature');
         r.wantsHumanSupport = extractBooleanValue(raw, 'wantsHumanSupport');
+        r.isFollowUp = extractBooleanValue(raw, 'isFollowUp');
         r.summary = extractStringValue(raw, 'summary');
+
             System.debug('Parser raw = ' + raw);
             System.debug('Parser category = ' + r.category);
+            System.debug('Parser isFollowUp = ' + r.isFollowUp);
         results.add(r);
-
-            /*try {
-                Map<String, Object> payload =
-                    (Map<String, Object>) JSON.deserializeUntyped(req.jsonResponse);
-
-                r.intent = getStringValue(payload, 'intent');
-                r.category = getStringValue(payload, 'category');
-                r.issueNature = getStringValue(payload, 'issueNature');
-                r.wantsHumanSupport = getBooleanValue(payload, 'wantsHumanSupport');
-                r.summary = getStringValue(payload, 'summary');
-
-            } catch (Exception e) {
-                System.debug('NexaClassificationParserV2 error: ' + e.getMessage());
-            }*/
-
-            
         }
 
         return results;
@@ -100,6 +90,7 @@ public with sharing class NexaClassificationParserV2 {
 
         return results[0];
     }
+
 private static String normalize(String raw) {
     if (String.isBlank(raw)) {
         return '';
