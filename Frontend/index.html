@@ -404,6 +404,20 @@ header {
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* ─── MOBILE RESPONSIVE ──────────────────── */
+@media (max-width: 480px) {
+  .logo-sub { display: none; }
+  header { padding: 10px 16px; }
+  .logo-v { width: 32px; height: 32px; font-size: 16px; }
+  .powered-tag { display: none; }
+  .input-zone { padding: 10px 12px 14px; }
+  .input-inner { padding: 6px 6px 6px 10px; }
+  .bubble { max-width: 85%; font-size: 13px; }
+  #msgInput { font-size: 12px; }
+.btns { gap: 6px; }
+.btn-mic, .btn-send { width: 36px; height: 36px; }
+}
+
 .hidden { display: none !important; }
 svg { display: block; }
 </style>
@@ -496,7 +510,10 @@ const CHAT_ENDPOINT='http://localhost:3000/chat';
 let accessToken = null;
 let sessionId   = null;
 let recording   = false;
+let isVoiceMode = false;
 let recog       = null;
+
+
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const chatWrap = document.getElementById('chatWrap');
@@ -563,6 +580,7 @@ async function process(txt) {
 
     const msg = d.message || 'Something went wrong. Please try again.';
     addMsg('bot', msg, parseCaseInfo(msg, d));
+    if (isVoiceMode) { speak(msg); isVoiceMode = false; }
   } catch(e) {
     removeTyping(tid);
     console.error(e);
@@ -657,10 +675,11 @@ function toggleMic() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recog = new SR();
   recog.lang = 'en-US';
-  recog.interimResults = true;
+  recog.interimResults = false;
   recog.continuous = false;
 
-  recog.onstart  = () => { recording = true;  micBtn.classList.add('on'); };
+ // recog.onstart  = () => { recording = true;  micBtn.classList.add('on'); };
+ recog.onstart  = () => { recording = true; isVoiceMode = true; micBtn.classList.add('on'); };
   recog.onend    = () => { recording = false; micBtn.classList.remove('on'); if (msgInput.value.trim()) doSend(); };
   recog.onerror  = () => { recording = false; micBtn.classList.remove('on'); };
   recog.onresult = e => {
@@ -668,8 +687,20 @@ function toggleMic() {
     msgInput.style.height = 'auto';
     msgInput.style.height = Math.min(msgInput.scrollHeight, 130) + 'px';
   };
+
   recog.start();
 }
+  // ── SPEAK (Text to Speech) ────────────────────────────────────────────────────
+function speak(text) {
+  if (!text) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-US';
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
 </script>
 </body>
 </html>
