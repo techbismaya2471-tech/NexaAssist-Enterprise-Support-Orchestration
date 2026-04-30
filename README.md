@@ -1,6 +1,6 @@
-NexaAssist – Enterprise Support Orchestration Platform
+Velyza – Enterprise Support Orchestration Platform
 Overview
-NexaAssist is an enterprise-style Salesforce support platform built to simulate how real organizations handle customer issues across multiple channels.
+Velyza is an enterprise-style Salesforce support platform built to simulate how real organizations handle customer issues across multiple channels.
 The platform uses Salesforce Agentforce, Apex, Omni-Channel, and intelligent case orchestration to:
 •	classify customer issues
 •	prevent duplicate case creation
@@ -17,7 +17,7 @@ In many organizations, support teams face these common problems:
 •	customers must repeat the same information multiple times
 •	support agents do not have complete context
 •	there is no intelligent routing between self-service and human support
-NexaAssist solves this by creating a support orchestration layer on top of Salesforce.
+Velyza solves this by creating a support orchestration layer on top of Salesforce.
  
 Key Features
 Intelligent Case Creation
