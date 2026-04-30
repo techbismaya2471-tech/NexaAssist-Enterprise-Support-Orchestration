@@ -504,7 +504,7 @@ svg { display: block; }
 <script>
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 
-const CHAT_ENDPOINT='http://localhost:3000/chat';
+const CHAT_ENDPOINT='https://velyza-enterprise-support-orchestra.vercel.app/chat';
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let accessToken = null;
@@ -578,7 +578,7 @@ async function process(txt) {
       source:    'web',
       lastCategory: lastCategory || null
     };
-    const r = await fetch('http://localhost:3000/chat', {
+    const r = await fetch('https://velyza-enterprise-support-orchestra.vercel.app/chat', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
