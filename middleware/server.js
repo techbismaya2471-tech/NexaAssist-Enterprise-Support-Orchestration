@@ -32,6 +32,7 @@ app.post('/chat', async (req, res) => {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        timeout: 60000,
       }
     );
     res.json(response.data);

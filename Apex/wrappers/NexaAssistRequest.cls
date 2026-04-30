@@ -5,5 +5,6 @@ global with sharing class NexaAssistRequest {
     public String message;
     public String source;
     public String correlationId;
+    public String lastCategory;
 
 }

@@ -1,29 +1,42 @@
 public with sharing class NexaAssistOrchestrator {
- public static NexaAssistResponse process(NexaAssistRequest req) {
-    NexaAssistResponse res = new NexaAssistResponse();
+    public static NexaAssistResponse process(NexaAssistRequest req) {
+        NexaAssistResponse res = new NexaAssistResponse();
 
-    try {
-        String token = AgentApiService.getAccessToken();
+        try {
+            String token = AgentApiService.getAccessToken();
 
-        AgentApiService.SessionResponse session =
-            AgentApiService.createSession(token);
+            String activeSessionId;
 
-        String agentReply = AgentApiService.sendMessage(
-            token,
-            session.sessionId,
-            req.message,
-            1
-        );
+            if (String.isNotBlank(req.sessionId)) {
+                activeSessionId = req.sessionId;
+            } else {
+                AgentApiService.SessionResponse session =
+                    AgentApiService.createSession(token);
+                activeSessionId = session.sessionId;
+            }
 
-        res.success = true;
-        res.message = agentReply;
-        res.sessionId = session.sessionId;
+            // lastCategory ko message ke saath append karo
+            String messageToSend = req.message;
+            if (String.isNotBlank(req.lastCategory)) {
+                messageToSend = req.message + ' ||lastCategory:' + req.lastCategory + '||';
+            }
 
-    } catch (Exception e) {
-        res.success = false;
-        res.message = e.getMessage();
+            String agentReply = AgentApiService.sendMessage(
+                token,
+                activeSessionId,
+                messageToSend,
+                1
+            );
+
+            res.success   = true;
+            res.message   = agentReply;
+            res.sessionId = activeSessionId;
+
+        } catch (Exception e) {
+            res.success = false;
+            res.message = e.getMessage();
+        }
+
+        return res;
     }
-
-    return res;
-}
 }

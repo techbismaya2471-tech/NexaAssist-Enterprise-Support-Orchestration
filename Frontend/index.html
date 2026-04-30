@@ -509,6 +509,7 @@ const CHAT_ENDPOINT='http://localhost:3000/chat';
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let accessToken = null;
 let sessionId   = null;
+let lastCategory = null;
 let recording   = false;
 let isVoiceMode = false;
 let recog       = null;
@@ -542,9 +543,19 @@ msgInput.addEventListener('keydown', e => {
 });
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
+function detectCategory(txt) {
+    const t = txt.toLowerCase();
+    if (t.includes('billing') || t.includes('charge') || t.includes('payment') || t.includes('invoice') || t.includes('refund')) return 'Billing';
+    if (t.includes('login') || t.includes('password') || t.includes('sign in') || t.includes('access') || t.includes('account')) return 'Login';
+    if (t.includes('technical') || t.includes('not working') || t.includes('error') || t.includes('slow') || t.includes('crash') || t.includes('device')) return 'Technical';
+    if (t.includes('subscription') || t.includes('plan') || t.includes('upgrade') || t.includes('cancel')) return 'Subscription';
+    return null;
+}
 async function doSend() {
   const txt = msgInput.value.trim();
   if (!txt) return;
+  
+ 
   msgInput.value = '';
   msgInput.style.height = 'auto';
   welcome.classList.add('hidden');
@@ -564,7 +575,8 @@ async function process(txt) {
     const payload = {
       message:   txt,
       sessionId: sessionId || null,
-      source:    'web'
+      source:    'web',
+      lastCategory: lastCategory || null
     };
     const r = await fetch('http://localhost:3000/chat', {
       method:  'POST',
@@ -577,7 +589,7 @@ async function process(txt) {
 
     // Save sessionId for conversation continuity
     if (d.sessionId && !sessionId) sessionId = d.sessionId;
-
+    if (d.category) lastCategory = d.category;
     const msg = d.message || 'Something went wrong. Please try again.';
     addMsg('bot', msg, parseCaseInfo(msg, d));
     if (isVoiceMode) { speak(msg); isVoiceMode = false; }
@@ -592,7 +604,7 @@ function parseCaseInfo(msg, d) {
   if (d && d.caseNumber) {
     return { num: d.caseNumber, escalated: d.escalated || false, category: d.category || '' };
   }
-  const m = msg.match(/case\s+([\w\d]+)/i);
+  const m = msg.match(/case\s+\(?([\w\d]+)\)?/i);
   if (!m) return null;
   return { num: m[1], escalated: /escalat/i.test(msg), category: '' };
 }
